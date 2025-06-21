@@ -3,9 +3,16 @@
 A Chrome extension that predicts car deal quality on marketplace websites using machine learning. This project demonstrates end-to-end ML engineering capabilities including planning, building, and deploying ML projects.
 
 
+
 ## 🎯 Project Overview
 
 Deal IQ analyzes used car listings on popular marketplace websites and provides instant deal quality predictions, helping users identify great deals and avoid overpriced vehicles.
+
+### Key Value Propositions
+- **Real-time Analysis**: Instant predictions on live marketplace listings
+- **Data-Driven Insights**: ML model trained on 400K+ vehicle listings
+- **Cost-Effective**: Serverless deployment keeping operational costs <$10/month
+- **Scalable Architecture**: Cloud-native design ready for high traffic
 
 ## ✨ Features
 
@@ -37,7 +44,7 @@ For each analyzed listing, Deal IQ provides:
 ### Scope
 - **Vehicle Type**: Used cars only
 - **Geographic Coverage**: USA-based listings
-- **Training Data**: 2017-2022 vehicle listings
+- **Training Data**: 2017-2022 vehicle listings (1.5GB dataset → 800MB processed)
 
 ## 🔧 Technical Features
 
@@ -67,6 +74,40 @@ For each analyzed listing, Deal IQ provides:
 - **Paint Color** - Vehicle exterior color
 - **Description** - Text analysis of listing description
 
+### Model Performance Targets
+- **Primary Metric**: RMSE < $2,500
+- **Secondary Metrics**: MAE, R² Score, MAPE
+- **Inference Time**: < 200ms per prediction
+- **Model Size**: Optimized for serverless cold starts
+
+## 🏗️ Infrastructure & Deployment
+
+
+![ML Pipeline Workflow](assets/Lifecycle.png)
+*Complete ML development lifecycle from data collection to monitoring*
+
+The project follows a comprehensive ML pipeline architecture with five main stages:
+- **Data Collection & Storage**: Raw data acquisition and versioning
+- **Data Preparation**: Cleaning, feature engineering, and validation
+- **Model Development**: Training multiple algorithms and hyperparameter tuning
+- **Deployment**: Serverless model serving via Google Cloud Run
+- **Monitoring**: Performance tracking and model maintenance
+
+## 🛠️ Technology Stack
+
+![Technology Stack](assets/Techstack.png)
+*Python-based data science and ML technology ecosystem*
+
+### Core Technologies
+- **Backend**: Python 3.11+, FastAPI for REST API
+- **ML Libraries**: scikit-learn, XGBoost, LightGBM for traditional ML
+- **Data Processing**: pandas, NumPy for data manipulation
+- **Visualization**: matplotlib, seaborn for EDA and insights
+- **Deployment**: Google Cloud Run (serverless), Docker containers
+- **Storage**: Google Cloud Storage for data and model artifacts
+- **Monitoring**: MLflow for experiment tracking and model versioning
+
+
 ## 🎮 User Experience
 
 ### Current Implementation
@@ -84,18 +125,35 @@ For each analyzed listing, Deal IQ provides:
 - **Price Alerts**: Notify when great deals appear
 - **Historical Tracking**: Track price changes over time
 
-## 🚀 Getting Started
+## 📊 Project Phases
 
-### Prerequisites
-- Python 3.11+
-- Conda or Miniconda
-- Poetry
-- Chrome browser for extension testing
+### Phase 1: Foundation & Planning ✅
+- System architecture design
+- Technology stack selection
+- Infrastructure planning
+- Cost optimization analysis
 
-### Installation
+### Phase 2: Data Processing & EDA 🔄 (Current)
+- Data cleaning and validation pipeline
+- Exploratory data analysis and insights
+- Feature engineering and selection
+- Data quality assessment
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Dhruv-88/Deal_IQ.git
-   cd Deal_IQ
-   
+### Phase 3: Model Development (Upcoming)
+- Algorithm experimentation (scikit-learn, XGBoost, LightGBM)
+- Hyperparameter tuning and optimization
+- Model evaluation and selection
+- Performance benchmarking
+
+### Phase 4: Deployment & API
+- FastAPI REST API development
+- Google Cloud Run deployment
+- Model serving optimization
+- API documentation and testing
+
+### Phase 5: Chrome Extension
+- Extension architecture and UI design
+- Marketplace website integration
+- Real-time data extraction
+- User experience optimization
+
