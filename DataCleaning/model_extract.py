@@ -33,16 +33,7 @@ def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
     }
     
     # Common car manufacturers for identification
-    manufacturers = [
-        'gmc', 'chevrolet', 'toyota', 'ford', 'jeep', 'nissan', 'ram',
-       'mazda', 'cadillac', 'honda', 'dodge', 'lexus', 'jaguar', 'buick',
-       'chrysler', 'volvo', 'audi', 'infiniti', 'lincoln', 'alfa-romeo',
-       'subaru', 'acura', 'hyundai', 'mercedes-benz', 'bmw',
-       'mitsubishi', 'volkswagen', 'porsche', 'kia', 'rover', 'ferrari',
-       'mini', 'pontiac', 'fiat', 'tesla', 'saturn', 'mercury',
-       'harley-davidson', 'datsun', 'aston-martin', 'land rover',
-       'morgan','genesis','Freightliner','International','Scion','smart','Isuzu','Maserati'
-    ]
+    manufacturers = pd.read_csv('manufacturers_list.csv')['manufacturer'].tolist()
     
     def parse_string(text_to_parse: str) -> Dict[str, Optional[Union[str, int]]]:
         """Parse individual string and extract components"""
