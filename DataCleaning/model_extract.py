@@ -2,6 +2,7 @@ import pandas as pd
 import re
 import numpy as np
 from typing import Dict, Optional, Union
+import os
 
 def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -33,7 +34,7 @@ def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
     }
     
     # Common car manufacturers for identification
-    manufacturers = pd.read_csv('manufacturers_list.csv')['manufacturer'].tolist()
+    manufacturers = pd.read_csv('../data/manufacturers_list.csv')['manufacturer'].tolist()
     
     def parse_string(text_to_parse: str) -> Dict[str, Optional[Union[str, int]]]:
         """Parse individual string and extract components"""
@@ -232,3 +233,4 @@ def process_car_dataset(df: pd.DataFrame) -> pd.DataFrame:
 #         print(f"  Cylinders: {row['cylinders']}")
 #         print(f"  Year: {row['year']}")
 #         print()
+
