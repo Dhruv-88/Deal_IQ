@@ -147,6 +147,28 @@ def _create_model_variations(model):
     
     return variations
 
+def filter_by_value_counts(df, column, min_count=1):
+    """
+    Filter DataFrame to keep only rows where the specified column value 
+    appears at least min_count times.
+    
+    Parameters:
+    df (pd.DataFrame): Input DataFrame
+    column (str): Column name to check value counts for
+    min_count (int): Minimum number of occurrences to keep (default: 1)
+    
+    Returns:
+    pd.DataFrame: Filtered DataFrame
+    """
+    # Get values that appear at least min_count times
+    frequent_values = df[column].value_counts()
+    frequent_values = frequent_values[frequent_values >= min_count].index
+    
+    # Keep only rows with frequently occurring values
+    filtered_df = df[df[column].isin(frequent_values)]
+    
+    return filtered_df
+    
 def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
     """
     Cleans model and manufacturer names based on a predefined list from data/models.py.
