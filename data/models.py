@@ -381,6 +381,39 @@ am_general_models = [
     "m998",
     "mv-1"
 ]
+
+chevrolet_models = [
+    "corvette",
+    "camaro",
+    "impala",
+    "malibu",
+    "silverado",
+    "tahoe",
+    "suburban",
+    "equinox",
+    "cruze",
+    "traverse",
+    "blazer",
+    "colorado",
+    "express",
+    "sonic",
+    "volt",
+    "ss",
+    "avalanche",
+    "captiva",
+    "astro",
+    "s10",
+    "monte carlo",
+    "cavalier",
+    "nova",
+    "chevelle",
+    "el camino",
+    "bel air",
+    "caprice",
+    "z-71",
+
+]
+
 saturn_models = [
     "astra",
     "aura",
