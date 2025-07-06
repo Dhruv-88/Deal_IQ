@@ -45,3 +45,46 @@ def validate_title_status_values(df, title_col='title_status'):
     }
     
     return valid_df, validation_summary
+
+
+def fill_missing_values(df, column_name="title_status", fill_value='missing'):
+    """
+    Fill missing values (NaN/null) in a specific column with a specified value
+    
+    Parameters:
+    df (pd.DataFrame): Input DataFrame
+    column_name (str): Name of the column to fill missing values
+    fill_value (str/int/float): Value to use for filling missing values (default: 'missing')
+    
+    Returns:
+    pd.DataFrame: DataFrame with missing values filled in the specified column
+    dict: Summary of missing values before and after filling
+    """
+    
+    # Create a copy to avoid modifying the original DataFrame
+    df_filled = df.copy()
+    
+    # Check if column exists
+    if column_name not in df_filled.columns:
+        raise ValueError(f"Column '{column_name}' not found in DataFrame")
+    
+    # Count missing values before filling
+    missing_before = df_filled[column_name].isnull().sum()
+    
+    # Fill missing values
+    df_filled[column_name] = df_filled[column_name].fillna(fill_value)
+    
+    # Count missing values after filling
+    missing_after = df_filled[column_name].isnull().sum()
+    
+    # Create summary
+    summary = {
+        'column_name': column_name,
+        'fill_value': fill_value,
+        'missing_before': missing_before,
+        'missing_after': missing_after,
+        'values_filled': missing_before - missing_after,
+        'total_rows': len(df_filled)
+    }
+    
+    return df_filled, summary

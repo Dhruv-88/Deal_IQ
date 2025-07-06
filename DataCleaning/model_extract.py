@@ -142,7 +142,7 @@ def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
                         if pd.isna(current_value) or str(current_value).strip() == '' or str(current_value).lower() == 'nan':
                             df_clean.at[idx, field] = value
     
-    return df_clean
+    return df_clean  
 
 def clean_and_validate_data(df: pd.DataFrame) -> pd.DataFrame:
     """Additional cleaning and validation"""
@@ -193,44 +193,4 @@ def process_car_dataset(df: pd.DataFrame) -> pd.DataFrame:
     
     return df_final
 
-# # Example of how to use the script
-# if __name__ == "__main__":
-#     # Create sample data for testing
-#     sample_data = {
-#         'model': [
-#             'Genesis G80 3.8 Sedan 4D',
-#             'Toyota Camry 2022 4 Cylinder FWD',
-#             'Ford F-150 Pickup Truck 8 Cylinders RWD',
-#             'Honda Civic Coupe',
-#             'BMW X5 SUV AWD 6 Cylinders 2021'
-#         ],
-#         'manufacturer': [np.nan, 'Toyota', np.nan, np.nan, 'BMW'],
-#         'type': [np.nan, np.nan, 'pickup', 'coupe', np.nan],
-#         'drive': [np.nan, np.nan, np.nan, np.nan, np.nan],
-#         'cylinders': [np.nan, np.nan, np.nan, np.nan, np.nan],
-#         'year': [np.nan, np.nan, np.nan, np.nan, np.nan]
-#     }
-    
-#     df_sample = pd.DataFrame(sample_data)
-#     print("Original data:")
-#     print(df_sample)
-#     print("\n" + "="*50 + "\n")
-    
-#     # Process the data
-#     df_result = process_car_dataset(df_sample)
-    
-#     print("Processed data:")
-#     print(df_result)
-    
-#     # Show what was extracted
-#     print("\n" + "="*50 + "\n")
-#     print("Extraction summary:")
-#     for idx, row in df_result.iterrows():
-#         print(f"Row {idx}: {row['model']}")
-#         print(f"  Manufacturer: {row['manufacturer']}")
-#         print(f"  Type: {row['type']}")
-#         print(f"  Drive: {row['drive']}")
-#         print(f"  Cylinders: {row['cylinders']}")
-#         print(f"  Year: {row['year']}")
-#         print()
 
