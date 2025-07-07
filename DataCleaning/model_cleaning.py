@@ -3,6 +3,7 @@ import re
 import os
 import importlib.util
 from tqdm.auto import tqdm
+import numpy as np
 
 # Register tqdm for pandas
 tqdm.pandas(desc="Cleaning Models")
@@ -28,7 +29,7 @@ def remove_numerical_models(df: pd.DataFrame, model_column: str = 'model') -> pd
     # Get the total number of rows before cleaning
     total_rows_before = len(df_clean)
     
-    # Create masks to identify rows to remove
+    # Create masks to identify rows to remove (vectorized operations)
     # 1. Rows with only numerical values in model column
     numerical_mask = df_clean[model_column].astype(str).str.match(r'^\d+$', na=False)
     
@@ -168,12 +169,12 @@ def filter_by_value_counts(df, column, min_count=1):
     filtered_df = df[df[column].isin(frequent_values)]
     
     return filtered_df
-    
-def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
-    """
-    Cleans model and manufacturer names based on a predefined list from data/models.py.
-    Handles edge cases like hyphen/space variations and manufacturer prefixes.
 
+def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
+    """
+    Optimized version of clean_models_with_list that uses vectorized operations and caching
+    for much faster performance.
+    
     Args:
         df (pd.DataFrame): DataFrame with model and manufacturer columns.
         model_column (str, optional): Name of the model column. Defaults to 'model'.
@@ -182,6 +183,7 @@ def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufa
     Returns:
         pd.DataFrame: DataFrame with cleaned model and manufacturer names.
     """
+    print("Starting optimized model cleaning...")
     df_clean = df.copy()
     models_by_manufacturer = _load_models_by_manufacturer()
 
@@ -189,17 +191,16 @@ def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufa
         print("Warning: No models loaded, returning original DataFrame.")
         return df_clean
 
-    # Create comprehensive lookup dictionaries
-    model_to_manufacturer = {}
-    normalized_to_original = {}
+    # Create comprehensive lookup dictionaries - this is done once
+    print("Creating optimized lookup tables...")
     
-    print("Creating model variations and lookup tables...")
+    # Direct lookup for exact matches
+    exact_match_dict = {}
+    contains_match_dict = {}
+    prefix_match_dict = {}
     
     for manufacturer, models in models_by_manufacturer.items():
         for model in models:
-            # Store original mapping
-            model_to_manufacturer[model] = manufacturer
-            
             # Create variations for this model
             variations = _create_model_variations(model)
             
@@ -207,100 +208,100 @@ def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufa
                 # Normalize the variation
                 normalized_variation = _normalize_text(variation)
                 if normalized_variation:
-                    normalized_to_original[normalized_variation] = model
-                    model_to_manufacturer[model] = manufacturer
-
-    print("Starting model and manufacturer cleaning...")
+                    # Store for exact matches
+                    exact_match_dict[normalized_variation] = (model, manufacturer)
+                    
+                    # Store for contains matches (sorted by length desc for priority)
+                    if normalized_variation not in contains_match_dict:
+                        contains_match_dict[normalized_variation] = []
+                    contains_match_dict[normalized_variation].append((model, manufacturer))
     
-    # Track changes
-    original_models = df_clean[[model_column, manufacturer_column]].copy()
+    # Sort contains matches by length (longer matches first)
+    for key in contains_match_dict:
+        contains_match_dict[key] = sorted(contains_match_dict[key], key=lambda x: len(x[0]), reverse=True)
     
-    def find_best_match(text):
-        """
-        Find the best model match for a given text using multiple strategies.
-        """
+    # Get unique model texts to process (avoid duplicate processing)
+    print("Processing unique model values...")
+    unique_models = df_clean[model_column].dropna().unique()
+    
+    # Create a mapping from original text to cleaned result
+    text_to_result = {}
+    
+    # Process unique models with progress bar
+    for original_text in tqdm(unique_models, desc="Processing unique models"):
+        normalized_text = _normalize_text(original_text)
+        matched_model, matched_manufacturer = None, None
+        
+        # Strategy 1: Direct exact match (fastest)
+        if normalized_text in exact_match_dict:
+            matched_model, matched_manufacturer = exact_match_dict[normalized_text]
+        
+        # Strategy 2: Contains match (if no exact match)
+        elif normalized_text:
+            # Check if any known model is contained in the text
+            for model_variation in sorted(contains_match_dict.keys(), key=len, reverse=True):
+                if re.search(r'\b' + re.escape(model_variation) + r'\b', normalized_text):
+                    matched_model, matched_manufacturer = contains_match_dict[model_variation][0]
+                    break
+            
+            # Strategy 3: Manufacturer prefix match (if no contains match)
+            if not matched_model:
+                words = normalized_text.split()
+                if len(words) >= 2:
+                    remaining_text = ' '.join(words[1:])
+                    if remaining_text in exact_match_dict:
+                        matched_model, matched_manufacturer = exact_match_dict[remaining_text]
+            
+            # Strategy 4: Starts with match (if no prefix match)
+            if not matched_model:
+                for model_variation in sorted(contains_match_dict.keys(), key=len, reverse=True):
+                    if normalized_text.startswith(model_variation + ' '):
+                        matched_model, matched_manufacturer = contains_match_dict[model_variation][0]
+                        break
+        
+        # Store the result
+        text_to_result[original_text] = (matched_model, matched_manufacturer)
+    
+    # Apply the mapping to the DataFrame (vectorized operation)
+    print("Applying results to DataFrame...")
+    
+    # Create a function to map the results
+    def map_result(text):
         if pd.isna(text):
             return None, None
-            
-        original_text = str(text).lower()
-        normalized_text = _normalize_text(text)
-        
-        # Strategy 1: Direct normalized match
-        if normalized_text in normalized_to_original:
-            matched_model = normalized_to_original[normalized_text]
-            return matched_model, model_to_manufacturer[matched_model]
-        
-        # Strategy 2: Check if any known model is contained in the text
-        # Sort models by length (desc) to match more specific models first
-        sorted_models = sorted(normalized_to_original.keys(), key=len, reverse=True)
-        
-        for model_variation in sorted_models:
-            # Check if model is a word boundary match in the text
-            if re.search(r'\b' + re.escape(model_variation) + r'\b', normalized_text):
-                matched_model = normalized_to_original[model_variation]
-                return matched_model, model_to_manufacturer[matched_model]
-        
-        # Strategy 3: Check for manufacturer prefix matches
-        # e.g., "toyota sequoia" -> "sequoia"
-        words = normalized_text.split()
-        if len(words) >= 2:
-            # Check if first word is a manufacturer and second+ words form a model
-            first_word = words[0]
-            remaining_text = ' '.join(words[1:])
-            
-            # Check if remaining text matches any model
-            if remaining_text in normalized_to_original:
-                matched_model = normalized_to_original[remaining_text]
-                matched_manufacturer = model_to_manufacturer[matched_model]
-                
-                # Verify the manufacturer matches or is similar
-                if (first_word == matched_manufacturer or 
-                    first_word.replace('-', '') == matched_manufacturer.replace('-', '') or
-                    first_word in matched_manufacturer or 
-                    matched_manufacturer in first_word):
-                    return matched_model, matched_manufacturer
-        
-        # Strategy 4: Partial matching for models with additional text
-        # e.g., "escape r4529" -> "escape"
-        for model_variation in sorted_models:
-            if normalized_text.startswith(model_variation + ' '):
-                matched_model = normalized_to_original[model_variation]
-                return matched_model, model_to_manufacturer[matched_model]
-        
-        return None, None
+        return text_to_result.get(text, (None, None))
     
-    # Apply the matching function
-    print("Applying model matching...")
-    results = df_clean[model_column].progress_apply(find_best_match)
+    # Apply the mapping
+    results = df_clean[model_column].map(map_result)
     
     # Extract matched models and manufacturers
-    matched_models = [result[0] for result in results]
-    matched_manufacturers = [result[1] for result in results]
+    matched_models = [result[0] if result else None for result in results]
+    matched_manufacturers = [result[1] if result else None for result in results]
     
     # Create boolean mask for rows with valid matches
-    mask = pd.Series(matched_models).notna()
+    mask = pd.Series(matched_models, index=df_clean.index).notna()
+    
+    # Track original values for comparison
+    original_models = df_clean[model_column].copy()
+    original_manufacturers = df_clean[manufacturer_column].copy()
     
     if mask.any():
         print(f"Found {mask.sum()} models to update.")
         
-        # Get the indices where we have valid matches
-        valid_indices = df_clean.index[mask]
+        # Update using vectorized operations - fix the indexing issue
+        matched_models_series = pd.Series(matched_models, index=df_clean.index)
+        matched_manufacturers_series = pd.Series(matched_manufacturers, index=df_clean.index)
         
-        # Extract only the non-null values
-        valid_models = [model for model in matched_models if model is not None]
-        valid_manufacturers = [mfg for mfg in matched_manufacturers if mfg is not None]
-        
-        # Update the DataFrame
-        df_clean.loc[valid_indices, model_column] = valid_models
-        df_clean.loc[valid_indices, manufacturer_column] = valid_manufacturers
+        df_clean.loc[mask, model_column] = matched_models_series[mask]
+        df_clean.loc[mask, manufacturer_column] = matched_manufacturers_series[mask]
     else:
         print("No models were updated.")
 
     # Calculate changes
-    changed_rows = (original_models[model_column] != df_clean[model_column]) | \
-                   (original_models[manufacturer_column] != df_clean[manufacturer_column])
+    changed_rows = (original_models != df_clean[model_column]) | \
+                   (original_manufacturers != df_clean[manufacturer_column])
     
-    print(f"Step: clean_models_with_list")
+    print(f"Step: clean_models_with_list_optimized")
     print(f"Total rows modified: {changed_rows.sum()}")
     
     # Show some examples of changes
@@ -308,10 +309,17 @@ def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufa
         print("\nSample transformations:")
         sample_changes = df_clean[changed_rows].head(10)
         for idx in sample_changes.index:
-            old_model = original_models.loc[idx, model_column]
+            old_model = original_models.loc[idx]
             new_model = df_clean.loc[idx, model_column]
-            old_mfg = original_models.loc[idx, manufacturer_column]
+            old_mfg = original_manufacturers.loc[idx]
             new_mfg = df_clean.loc[idx, manufacturer_column]
             print(f"  '{old_model}' ({old_mfg}) -> '{new_model}' ({new_mfg})")
 
     return df_clean
+
+# Keep the original function for backward compatibility
+def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
+    """
+    Wrapper function that calls the optimized version
+    """
+    return clean_models_with_list_optimized(df, model_column, manufacturer_column)
