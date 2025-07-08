@@ -3,12 +3,252 @@ import re
 import os
 import importlib.util
 from tqdm.auto import tqdm
-import numpy as np
+import numpy as np 
+from typing import Dict, Optional, Union
+
+
+
+def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract and organize car data from the 'model' and 'description' columns
+    """
+    # Make a copy to avoid modifying the original dataframe
+    df_clean = df.copy()
+    
+    # Define possible values for validation
+    # drive_options = [np.nan, 'rwd', '4wd', 'fwd']
+    # type_options = ['pickup', 'truck', 'other', np.nan, 'coupe', 'SUV', 'hatchback', 
+    #                'mini-van', 'sedan', 'offroad', 'bus', 'van', 'convertible', 'wagon']
+    # cylinder_options = ['8 cylinders', '6 cylinders', np.nan, '4 cylinders', 
+    #                    '5 cylinders', 'other', '3 cylinders', '10 cylinders', '12 cylinders']
+    
+    # Create mapping dictionaries for standardization
+    drive_mapping = {
+        '4d': '4wd', '4wd': '4wd', 'awd': '4wd','4x4': '4wd',
+        '2d': 'rwd', 'rwd': 'rwd', 'rear': 'rwd',
+        'fwd': 'fwd', 'front': 'fwd'
+    }
+    
+    type_mapping = {
+        'sedan': 'sedan', 'coupe': 'coupe', 'suv': 'SUV',
+        'hatchback': 'hatchback', 'wagon': 'wagon', 'convertible': 'convertible',
+        'pickup': 'pickup', 'truck': 'truck', 'van': 'van',
+        'mini-van': 'mini-van', 'minivan': 'mini-van',
+        'offroad': 'offroad', 'bus': 'bus'
+    }
+    
+    # Common car manufacturers for identification
+    manufacturers = pd.read_csv('../data/manufacturers_list.csv')['manufacturer'].tolist()
+    
+    def parse_string(text_to_parse: str) -> Dict[str, Optional[Union[str, int]]]:
+        """Parse individual string and extract components"""
+        if pd.isna(text_to_parse) or text_to_parse == '':
+            return {'manufacturer': None, 'type': None, 'drive': None, 'cylinders': None, 'year': None}
+        
+        text_str = str(text_to_parse).strip()
+        extracted: Dict[str, Optional[Union[str, int]]] = {
+            'manufacturer': None, 
+            'type': None, 
+            'drive': None, 
+            'cylinders': None, 
+            'year': None
+        }
+        
+        # Extract year (4-digit number, typically 1900-2030)
+        year_match = re.search(r'\b(19|20)\d{2}\b', text_str)
+        if year_match:
+            extracted['year'] = int(year_match.group())
+        
+        # Extract cylinders (number followed by 'cyl', 'cylinder', or 'cylinders')
+        cyl_patterns = [
+            r'(\d+)\s*(?:cyl|cylinder|cylinders?)\b',
+            r'\b(\d+)(?:\s*|-)?(?:cyl|cylinder|cylinders?)\b'
+        ]
+        for pattern in cyl_patterns:
+            cyl_match = re.search(pattern, text_str, re.IGNORECASE)
+            if cyl_match:
+                cyl_count = cyl_match.group(1)
+                extracted['cylinders'] = f"{cyl_count} cylinders"
+                break
+        
+        # Extract drive type
+        drive_patterns = [
+            r'\b(4d|4wd|awd|all.?wheel.?drive|4x4)\b',
+            r'\b(2d|rwd|rear.?wheel.?drive)\b',
+            r'\b(fwd|front.?wheel.?drive)\b'
+        ]
+        for pattern in drive_patterns:
+            drive_match = re.search(pattern, text_str, re.IGNORECASE)
+            if drive_match:
+                drive_found = drive_match.group(1).lower().replace('-', '').replace(' ', '')
+                extracted['drive'] = drive_mapping.get(drive_found, drive_found)
+                break
+        
+        # Extract type
+        type_patterns = [
+            r'\b(sedan|coupe|suv|hatchback|wagon|convertible|pickup|truck|van|mini.?van|minivan|offroad|bus)\b'
+        ]
+        for pattern in type_patterns:
+            type_match = re.search(pattern, text_str, re.IGNORECASE)
+            if type_match:
+                type_found = type_match.group(1).lower().replace('-', '')
+                extracted['type'] = type_mapping.get(type_found, type_found)
+                break
+        
+        # Extract manufacturer (check for multi-word manufacturers first, then single words)
+        model_lower = text_str.lower()
+        
+        # First check for multi-word manufacturers (longer names first to avoid partial matches)
+        multi_word_manufacturers = [m for m in manufacturers if ' ' in m or '-' in m]
+        # Sort by length (longest first) to avoid partial matches
+        multi_word_manufacturers.sort(key=len, reverse=True)
+        
+        for manufacturer in multi_word_manufacturers:
+            # Handle both space and hyphen separators
+            manufacturer_pattern = manufacturer.replace('-', '[-\\s]')
+            if re.search(rf'\b{manufacturer_pattern}\b', model_lower, re.IGNORECASE):
+                extracted['manufacturer'] = manufacturer
+                break
+        
+        # If no multi-word manufacturer found, check single words
+        if not extracted['manufacturer']:
+            words = text_str.split()
+            for word in words:
+                word_clean = word.lower().strip()
+                for manufacturer in manufacturers:
+                    # Only check single-word manufacturers
+                    if ' ' not in manufacturer and '-' not in manufacturer:
+                        if word_clean == manufacturer.lower():
+                            extracted['manufacturer'] = manufacturer
+                            break
+                if extracted['manufacturer']:
+                    break
+        
+        return extracted
+    
+    # Initialize columns if they don't exist
+    required_columns = ['manufacturer', 'type', 'drive', 'cylinders', 'year']
+    for col in required_columns:
+        if col not in df_clean.columns:
+            df_clean[col] = np.nan
+    
+    # Process each row
+    for idx, row in df_clean.iterrows():
+        # Process 'model' then 'description' to fill in missing details
+        for source_col in ['model', 'description']:
+            if source_col in df_clean.columns and pd.notna(row[source_col]):
+                extracted_data = parse_string(row[source_col])
+                
+                # Fill missing data only if the current value is NaN or empty
+                for field, value in extracted_data.items():
+                    if value is not None:
+                        current_value = df_clean.at[idx, field]
+                        if pd.isna(current_value) or str(current_value).strip() == '' or str(current_value).lower() == 'nan':
+                            df_clean.at[idx, field] = value
+    
+    return df_clean  
+
+def clean_and_validate_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Additional cleaning and validation"""
+    df_clean = df.copy()
+    
+    # Standardize drive values
+    drive_mapping = {'4d': '4wd', '2d': 'rwd'}
+    if 'drive' in df_clean.columns:
+        df_clean['drive'] = df_clean['drive'].replace(drive_mapping)
+    
+    # Ensure cylinders format is consistent
+    if 'cylinders' in df_clean.columns:
+        def format_cylinders(val: Union[str, float, int, None]) -> Union[str, float, None]:
+            if pd.isna(val):
+                return val
+            val_str = str(val).lower()
+            # Extract number from various formats
+            match = re.search(r'(\d+)', val_str)
+            if match:
+                num = match.group(1)
+                return f"{num} cylinders"
+            return val
+        
+        df_clean['cylinders'] = df_clean['cylinders'].apply(format_cylinders)
+    
+    return df_clean
+
+def process_car_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Main function to process the car dataset
+    
+    Parameters:
+    df (pandas.DataFrame): DataFrame with 'model' column
+    
+    Returns:
+    pandas.DataFrame: Cleaned DataFrame with extracted data
+    """
+    print("Starting data extraction and cleaning...")
+    
+    # Extract data from model column
+    df_processed = extract_car_data(df)
+    
+    # Additional cleaning and validation
+    df_final = clean_and_validate_data(df_processed)
+    
+    print("Data extraction and cleaning completed!")
+    
+    return df_final
+
+
+
+def validate_model_frequency(df, model_column='model', min_count=10):
+    """
+    Keep only models that appear at least min_count times in the dataset
+    
+    Parameters:
+    df (pd.DataFrame): Input DataFrame
+    model_column (str): Name of model column
+    min_count (int): Minimum number of occurrences required (default: 10)
+    
+    Returns:
+    pd.DataFrame: DataFrame with only frequently occurring models
+    dict: Simple summary
+    """
+    
+    original_rows = len(df)
+    
+    # Get value counts for models
+    model_counts = df[model_column].value_counts()
+    
+    # Find models that appear at least min_count times
+    frequent_models = model_counts[model_counts >= min_count].index
+    
+    # Count models that don't meet the threshold
+    infrequent_models = model_counts[model_counts < min_count]
+    infrequent_count = infrequent_models.sum()
+    
+    # Keep only rows with frequent models (including NaN)
+    df_clean = df[df[model_column].isin(frequent_models) | df[model_column].isna()]
+    
+    final_rows = len(df_clean)
+    rows_dropped = original_rows - final_rows
+    
+    # Create summary
+    summary = {
+        'original_rows': original_rows,
+        'final_rows': final_rows,
+        'rows_dropped': rows_dropped,
+        'min_count_threshold': min_count,
+        'models_kept': len(frequent_models),
+        'models_dropped': len(infrequent_models),
+        'infrequent_model_rows': infrequent_count
+    }
+    
+    return df_clean, summary 
+
+
 
 # Register tqdm for pandas
 tqdm.pandas(desc="Cleaning Models")
 
-def remove_numerical_models(df: pd.DataFrame, model_column: str = 'model') -> pd.DataFrame:
+def remove_numerical_models(df: pd.DataFrame, model_column: str = 'model'):
     """
     Remove rows where the model column contains only numerical values
     or where the model name length is more than 40 characters
@@ -19,12 +259,18 @@ def remove_numerical_models(df: pd.DataFrame, model_column: str = 'model') -> pd
     
     Returns:
     pd.DataFrame: DataFrame with problematic rows removed
+    dict: Simple summary
     """
     df_clean = df.copy()
     
     if model_column not in df_clean.columns:
         print(f"Warning: Column '{model_column}' not found in DataFrame")
-        return df_clean
+        summary = {
+            'total_rows': len(df_clean),
+            'rows_removed': 0,
+            'error': f"Column '{model_column}' not found in DataFrame"
+        }
+        return df_clean, summary
     
     # Get the total number of rows before cleaning
     total_rows_before = len(df_clean)
@@ -54,8 +300,16 @@ def remove_numerical_models(df: pd.DataFrame, model_column: str = 'model') -> pd
     print(f"Rows removed due to length > 40: {length_mask.sum()}")
     print(f"Total rows removed: {rows_removed}")
     
-    return df_clean
-
+    # Create summary
+    summary = {
+        'total_rows_before': total_rows_before,
+        'total_rows_after': total_rows_after,
+        'rows_removed': rows_removed,
+        'numerical_removed': numerical_mask.sum(),
+        'length_removed': length_mask.sum()
+    }
+    
+    return df_clean, summary
 def _load_models_by_manufacturer():
     """
     Load model lists from data/models.py and organize them by manufacturer.
@@ -170,7 +424,7 @@ def filter_by_value_counts(df, column, min_count=1):
     
     return filtered_df
 
-def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
+def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer'):
     """
     Optimized version of clean_models_with_list that uses vectorized operations and caching
     for much faster performance.
@@ -182,6 +436,7 @@ def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'mode
 
     Returns:
         pd.DataFrame: DataFrame with cleaned model and manufacturer names.
+        dict: Simple summary
     """
     print("Starting optimized model cleaning...")
     df_clean = df.copy()
@@ -189,7 +444,13 @@ def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'mode
 
     if not models_by_manufacturer:
         print("Warning: No models loaded, returning original DataFrame.")
-        return df_clean
+        summary = {
+            'total_rows': len(df_clean),
+            'models_updated': 0,
+            'manufacturers_updated': 0,
+            'error': 'No models loaded'
+        }
+        return df_clean, summary
 
     # Create comprehensive lookup dictionaries - this is done once
     print("Creating optimized lookup tables...")
@@ -285,6 +546,10 @@ def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'mode
     original_models = df_clean[model_column].copy()
     original_manufacturers = df_clean[manufacturer_column].copy()
     
+    # Count changes
+    models_updated = 0
+    manufacturers_updated = 0
+    
     if mask.any():
         print(f"Found {mask.sum()} models to update.")
         
@@ -292,12 +557,16 @@ def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'mode
         matched_models_series = pd.Series(matched_models, index=df_clean.index)
         matched_manufacturers_series = pd.Series(matched_manufacturers, index=df_clean.index)
         
+        # Count actual changes
+        models_updated = (original_models != matched_models_series).sum()
+        manufacturers_updated = (original_manufacturers != matched_manufacturers_series).sum()
+        
         df_clean.loc[mask, model_column] = matched_models_series[mask]
         df_clean.loc[mask, manufacturer_column] = matched_manufacturers_series[mask]
     else:
         print("No models were updated.")
 
-    # Calculate changes
+    # Calculate total changes
     changed_rows = (original_models != df_clean[model_column]) | \
                    (original_manufacturers != df_clean[manufacturer_column])
     
@@ -315,11 +584,14 @@ def clean_models_with_list_optimized(df: pd.DataFrame, model_column: str = 'mode
             new_mfg = df_clean.loc[idx, manufacturer_column]
             print(f"  '{old_model}' ({old_mfg}) -> '{new_model}' ({new_mfg})")
 
-    return df_clean
+    # Create summary
+    summary = {
+        'total_rows': len(df_clean),
+        'rows_modified': changed_rows.sum(),
+        'models_updated': models_updated,
+        'manufacturers_updated': manufacturers_updated,
+        'unique_models_processed': len(unique_models),
+        'lookup_tables_created': len(exact_match_dict)
+    }
 
-# Keep the original function for backward compatibility
-def clean_models_with_list(df: pd.DataFrame, model_column: str = 'model', manufacturer_column: str = 'manufacturer') -> pd.DataFrame:
-    """
-    Wrapper function that calls the optimized version
-    """
-    return clean_models_with_list_optimized(df, model_column, manufacturer_column)
+    return df_clean, summary

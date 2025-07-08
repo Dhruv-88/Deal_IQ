@@ -1,3 +1,5 @@
+from typing import Dict
+import pandas as pd
 def drop_unnecessary_columns(df, columns_to_drop=None):
     """
     Drop columns that are not needed for analysis
@@ -15,7 +17,7 @@ def drop_unnecessary_columns(df, columns_to_drop=None):
     if columns_to_drop is None:
         columns_to_drop = [
             'url', 'image_url', 'county', 'VIN', 'size', 
-            'condition', 'posting_date', 'cylinders'
+            'condition', 'posting_date', 'cylinders','region','region_url'
         ]
     
     # Create a copy to avoid modifying the original DataFrame
@@ -66,7 +68,7 @@ def drop_rows_with_few_missing_values(df, columns_with_few_missing=None):
     if columns_with_few_missing is None:
         columns_with_few_missing = [
             'year', 'description', 'fuel', 'odometer', 
-            'lat', 'long', 'transmission', 'model',
+            'lat', 'long', 'transmission', 'model','manufacturer'
         ]
     
     # Create a copy to avoid modifying the original DataFrame

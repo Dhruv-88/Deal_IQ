@@ -1,35 +1,89 @@
-def validate_title_status_values(df, title_col='title_status'):
+import pandas as pd 
+def convert_fuel_to_gas(df, fuel_col='fuel'):
     """
-    Validate that title_status column contains only valid values and return filtered DataFrame
+    Convert all fuel values except 'diesel', 'hybrid', 'electric' to 'gas'
     
     Parameters:
     df (pd.DataFrame): Input DataFrame
-    title_col (str): Name of the title_status column
+    fuel_col (str): Name of the fuel column
     
     Returns:
-    pd.DataFrame: Filtered DataFrame with only valid title_status values
+    pd.DataFrame: DataFrame with standardized fuel values
+    dict: Summary of conversion results
+    """
+    
+    # Make a copy to avoid modifying original
+    df_converted = df.copy()
+    
+    # Store original values for summary
+    original_values = df_converted[fuel_col].value_counts().to_dict()
+    
+    # Valid fuel types (except gas, which is the default)
+    valid_non_gas = ['diesel', 'hybrid', 'electric']
+    
+    # Convert values: keep valid ones, convert others to 'gas'
+    def standardize_fuel(value):
+        if pd.isna(value):
+            return 'gas'
+        
+        clean_value = str(value).lower().strip()
+        
+        if clean_value in valid_non_gas:
+            return clean_value
+        else:
+            return 'gas'
+    
+    df_converted[fuel_col] = df_converted[fuel_col].apply(standardize_fuel)
+    
+    # New values for summary
+    new_values = df_converted[fuel_col].value_counts().to_dict()
+    
+    # Create summary
+    conversion_summary = {
+        'total_rows': len(df_converted),
+        'original_unique_values': len(original_values),
+        'new_unique_values': len(new_values),
+        'original_value_counts': original_values,
+        'new_value_counts': new_values,
+        'converted_to_gas': sum(count for value, count in original_values.items() 
+                               if str(value).lower().strip() not in valid_non_gas + ['gas'])
+    }
+    
+    return df_converted, conversion_summary
+
+
+def validate_fuel_values(df, fuel_col='fuel'):
+    """
+    Validate that fuel column contains only 'gas', 'diesel', 'hybrid', 'electric'
+    
+    Parameters:
+    df (pd.DataFrame): Input DataFrame
+    fuel_col (str): Name of the fuel column
+    
+    Returns:
+    pd.DataFrame: Filtered DataFrame with only valid fuel values
     dict: Summary of validation results
     """
     
-    # Valid title_status values
-    valid_values = ['clean', 'rebuilt', 'missing', 'salvage', 'lien', 'parts only']
+    # Valid fuel values
+    valid_values = ['gas', 'diesel', 'hybrid', 'electric']
     
     # Store original info
     original_count = len(df)
-    original_values = df[title_col].value_counts().to_dict()
+    original_values = df[fuel_col].value_counts().to_dict()
     
     # Find invalid values
-    invalid_mask = ~df[title_col].isin(valid_values)
-    invalid_values = df[invalid_mask][title_col].value_counts().to_dict()
+    invalid_mask = ~df[fuel_col].isin(valid_values)
+    invalid_values = df[invalid_mask][fuel_col].value_counts().to_dict()
     
     # Check for null values
-    null_count = df[title_col].isnull().sum()
+    null_count = df[fuel_col].isnull().sum()
     
     # Filter DataFrame to keep only valid values
-    valid_df = df[df[title_col].isin(valid_values)].copy()
+    valid_df = df[df[fuel_col].isin(valid_values)].copy()
     
     # Remove null values as well
-    valid_df = valid_df[valid_df[title_col].notna()].copy()
+    valid_df = valid_df[valid_df[fuel_col].notna()].copy()
     
     # Create summary
     validation_summary = {
@@ -45,3 +99,4 @@ def validate_title_status_values(df, title_col='title_status'):
     }
     
     return valid_df, validation_summary
+

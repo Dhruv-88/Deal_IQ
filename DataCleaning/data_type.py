@@ -1,3 +1,39 @@
+def drop_na_drive_type(df, drive_column='drive', type_column='type'):
+    """
+    Drop rows where both drive and type columns are missing
+    
+    Parameters:
+    df (pd.DataFrame): Input DataFrame
+    drive_column (str): Name of drive column
+    type_column (str): Name of type column
+    
+    Returns:
+    pd.DataFrame: DataFrame with rows removed where both columns are NA
+    dict: Simple summary
+    """
+    
+    # Count rows before dropping
+    original_rows = len(df)
+    
+    # Count rows where both are missing
+    both_missing = df[drive_column].isna() & df[type_column].isna()
+    rows_to_drop = both_missing.sum()
+    
+    # Drop rows where both columns are missing
+    df_clean = df.dropna(subset=[drive_column, type_column], how='all')
+    
+    final_rows = len(df_clean)
+    
+    # Create summary
+    summary = {
+        'original_rows': original_rows,
+        'final_rows': final_rows,
+        'rows_dropped': rows_to_drop,
+        'both_missing': rows_to_drop
+    }
+    
+    return df_clean, summary
+
 def validate_type_values(df, type_col='type', standardize_case=True):
     """
     Validate that type column contains only valid vehicle types and return filtered DataFrame

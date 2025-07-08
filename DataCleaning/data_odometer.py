@@ -284,36 +284,47 @@ def preview_odometer_cleaning(df, odometer_col='odometer'):
         print(f"  Potential outliers: {outliers_count:,}")
 
 
-def get_odometer_summary(df, odometer_col='odometer'):
+
+
+
+
+
+def validate_odometer(df, odometer_column='odometer', min_miles=0, max_miles=500000):
     """
-    Get comprehensive summary of odometer column
+    Validate odometer column to keep only values within specified range
     
     Parameters:
     df (pd.DataFrame): Input DataFrame
-    odometer_col (str): Name of the odometer column
+    odometer_column (str): Name of odometer column
+    min_miles (int): Minimum allowed miles (default: 0)
+    max_miles (int): Maximum allowed miles (default: 500000)
     
     Returns:
-    dict: Comprehensive summary statistics
+    pd.DataFrame: DataFrame with only valid odometer values
+    dict: Simple summary
     """
     
+    original_rows = len(df)
+    
+    # Find invalid values (outside range)
+    invalid_mask = (df[odometer_column] < min_miles) | (df[odometer_column] > max_miles)
+    invalid_count = invalid_mask.sum()
+    
+    # Keep only valid values (within range or NaN)
+    df_clean = df[((df[odometer_column] >= min_miles) & (df[odometer_column] <= max_miles)) | 
+                  df[odometer_column].isna()]
+    
+    final_rows = len(df_clean)
+    rows_dropped = original_rows - final_rows
+    
+    # Create summary
     summary = {
-        'total_rows': len(df),
-        'null_count': df[odometer_col].isnull().sum(),
-        'valid_count': df[odometer_col].notna().sum(),
-        'min_value': df[odometer_col].min(),
-        'max_value': df[odometer_col].max(),
-        'mean_value': df[odometer_col].mean(),
-        'median_value': df[odometer_col].median(),
-        'std_value': df[odometer_col].std(),
-        'zero_values': (df[odometer_col] == 0).sum(),
-        'negative_values': (df[odometer_col] < 0).sum(),
-        'extreme_high': (df[odometer_col] > 500000).sum(),
-        'percentiles': {}
+        'original_rows': original_rows,
+        'final_rows': final_rows,
+        'rows_dropped': rows_dropped,
+        'invalid_values': invalid_count,
+        'min_miles': min_miles,
+        'max_miles': max_miles
     }
     
-    # Add percentiles
-    for p in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
-        summary['percentiles'][f'p{p}'] = df[odometer_col].quantile(p/100)
-    
-    return summary
-
+    return df_clean, summary
