@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 CI/CD Test Script for GCS Data Operations
 This script tests the authentication and basic operations in GitHub Actions
