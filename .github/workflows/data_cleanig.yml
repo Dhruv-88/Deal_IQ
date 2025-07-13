@@ -94,6 +94,22 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ needs.setup.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
     
+    - name: 🔧 Install dependencies (ensure they exist)
+      run: |
+        echo "Ensuring dependencies are installed..."
+        poetry install --no-interaction --no-root
+        echo "Verifying core packages..."
+        poetry run python -c "import pandas, pyarrow; print('✅ Dependencies verified')"}
+    
+    - name: 🔧 Install dependencies (if not cached)
+      run: |
+        if [ ! -d ".venv" ] || [ ! -f ".venv/pyvenv.cfg" ]; then
+          echo "Virtual environment not found or incomplete, installing dependencies..."
+          poetry install --no-interaction --no-root
+        else
+          echo "Using cached dependencies"
+        fi
+    
     - name: 🔐 Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
