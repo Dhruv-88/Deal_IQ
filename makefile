@@ -87,7 +87,7 @@ poetry-config: ## Configure poetry to use conda environment
 install: ## Install project dependencies
 	$(require_env)
 	@echo "$(GREEN)Installing dependencies...$(NC)"
-	conda run -n $(CONDA_ENV_NAME) poetry install
+	conda run -n $(CONDA_ENV_NAME) poetry install --no-root
 
 .PHONY: install-dev
 install-dev: ## Install all dependencies including development

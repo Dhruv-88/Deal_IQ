@@ -1,747 +1,838 @@
-name: Data Cleaning Pipeline
+name: Data Pipeline CI/CD
 
+# Trigger the workflow
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      data_path:
-        description: 'Path to input CSV file'
-        required: false
-        default: 'data/vehicles.csv'
+  workflow_dispatch:  # Allow manual trigger
 
+# Set global environment variables
 env:
   PYTHON_VERSION: '3.12'
-  DATA_PATH: ${{ github.event.inputs.data_path || 'data/vehicles.csv' }}
 
 jobs:
-  # Stage 1: Standardizing
-  standardizing:
+  data-pipeline:
     runs-on: ubuntu-latest
-    outputs:
-      standardized-data: ${{ steps.upload-standardized.outputs.artifact-id }}
     
     steps:
-    - name: Checkout code
+    # Step 1: Checkout the repository code
+    - name: Checkout repository
       uses: actions/checkout@v4
     
+    # Step 2: Set up Python environment
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
+    # Step 3: Install Poetry
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        installer-parallel: true
+    
+    # Step 4: Load cached dependencies
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+    
+    # Step 5: Install dependencies if cache doesn't exist
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy tqdm
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+      run: poetry install --no-interaction --no-root
     
-    - name: Step 1.1 - Extract and standardize car data
-      run: |
-        python -c "
-        import sys, os
-        sys.path.append('.')
-        import pandas as pd
-        from DataCleaning.data_model import process_car_dataset
-        from utility.print_summary import print_summary
-        
-        print('Loading data...')
-        df = pd.read_csv('${{ env.DATA_PATH }}')
-        print(f'Original data shape: {df.shape}')
-        
-        print('Starting standardization...')
-        df_standardized, summary = process_car_dataset(df)
-        print_summary(summary)
-        
-        print('Saving standardized data...')
-        df_standardized.to_csv('data/standardized_data.csv', index=False)
-        print('Standardization completed!')
-        "
-    
-    - name: Step 1.2 - Drop unnecessary columns
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_cleaning import drop_unnecessary_columns
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/standardized_data.csv')
-        df, summary = drop_unnecessary_columns(df)
-        print_summary(summary)
-        
-        df.to_csv('data/columns_dropped.csv', index=False)
-        "
-    
-    - name: Step 1.3 - Drop rows with few missing values
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_cleaning import drop_rows_with_few_missing_values
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/columns_dropped.csv')
-        df, summary = drop_rows_with_few_missing_values(df)
-        print_summary(summary)
-        
-        df.to_csv('data/stage1_complete.csv', index=False)
-        "
-    
-    - name: Upload standardized data
-      id: upload-standardized
-      uses: actions/upload-artifact@v4
+    # Step 6: Set up Google Cloud Authentication
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
       with:
-        name: standardized-data
-        path: data/stage1_complete.csv
-        retention-days: 1
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+    
+    # Step 7: Set up Google Cloud SDK
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+    
+    # Step 8: Verify authentication
+    - name: Verify Google Cloud authentication
+      run: |
+        echo "Verifying authentication..."
+        gcloud auth list
+        gcloud config list project
+        
+        # Test GCS access
+        echo "Testing GCS access..."
+        gsutil ls gs://${{ secrets.GCS_BUCKET_NAME }} || echo "Bucket might be empty or doesn't exist yet"
+    
+    # Step 9: Set environment variables for Python
+    - name: Set environment variables
+      run: |
+        echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" >> $GITHUB_ENV
+    
+    # Step 10: Run tests and data operations
+    - name: Run data pipeline tests
+      run: |
+        echo "Running data pipeline operations..."
+        poetry run python scripts/ci_test.py
+      env:
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
+    
 
-  # Stage 2: Cleaning and Filling Null Values
-  cleaning-and-filling:
-    runs-on: ubuntu-latest
-    needs: standardizing
-    outputs:
-      cleaned-data: ${{ steps.upload-cleaned.outputs.artifact-id }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy tqdm
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Download standardized data
-      uses: actions/download-artifact@v4
-      with:
-        name: standardized-data
-        path: data/
-    
-    - name: Step 2.1 - Fill title_status missing values
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_title_status import fill_missing_values
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/stage1_complete.csv')
-        df, summary = fill_missing_values(df)
-        print_summary(summary)
-        df.to_csv('data/title_status_filled.csv', index=False)
-        "
-    
-    - name: Step 2.2 - Fill transmission missing values
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_transmission import fill_missing_values_transmission, convert_transmission_to_automatic
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/title_status_filled.csv')
-        df, summary = fill_missing_values_transmission(df)
-        print_summary(summary)
-        
-        df, summary = convert_transmission_to_automatic(df)
-        print_summary(summary)
-        df.to_csv('data/transmission_filled.csv', index=False)
-        "
-    
-    - name: Step 2.3 - Clean drive column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_drive import clean_drive_column, fill_missing_drive_from_reference, impute_drive_from_type
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/transmission_filled.csv')
-        
-        # Clean drive column
-        df, summary = clean_drive_column(df, 'drive')
-        print_summary(summary)
-        
-        # Fill from reference
-        df, summary = fill_missing_drive_from_reference(df, reference_file='data/models_with_drive.csv')
-        print_summary(summary)
-        
-        # Impute from type
-        df, summary = impute_drive_from_type(df)
-        print_summary(summary)
-        
-        df.to_csv('data/drive_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.4 - Clean model column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_model import remove_numerical_models, clean_models_with_list_optimized, filter_by_value_counts
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/drive_cleaned.csv')
-        
-        # Remove numerical models
-        df, summary = remove_numerical_models(df)
-        print_summary(summary)
-        
-        # Clean models with list
-        df, summary = clean_models_with_list_optimized(df)
-        print_summary(summary)
-        
-        # Filter by value counts
-        df = filter_by_value_counts(df, 'model', min_count=10)
-        
-        df.to_csv('data/model_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.5 - Clean type column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_type import drop_na_drive_type, replace_values, fill_type_from_model, drop_na_type
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/model_cleaned.csv')
-        
-        # Drop rows with both drive and type missing
-        df, summary = drop_na_drive_type(df)
-        print_summary(summary)
-        
-        # Standardize type values
-        df, summary = replace_values(df, 'type', {'mini van': 'minivan', 'mini-van': 'minivan'})
-        print_summary(summary)
-        
-        # Fill type from model
-        df, summary = fill_type_from_model(df)
-        print_summary(summary)
-        
-        # Drop remaining nulls
-        df, summary = drop_na_type(df)
-        print_summary(summary)
-        
-        df.to_csv('data/type_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.6 - Clean manufacturer column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_manufacturers import standardize_manufacturer
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/type_cleaned.csv')
-        df, summary = standardize_manufacturer(df)
-        print_summary(summary)
-        df.to_csv('data/manufacturer_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.7 - Clean paint color column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_paint_color import fill_paint_color_nulls
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/manufacturer_cleaned.csv')
-        df, summary = fill_paint_color_nulls(df)
-        print_summary(summary)
-        df.to_csv('data/paint_color_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.8 - Add census region
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_census_region import add_census_divisions_abbrev
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/paint_color_cleaned.csv')
-        df, summary = add_census_divisions_abbrev(df)
-        print_summary(summary)
-        df.to_csv('data/census_region_added.csv', index=False)
-        "
-    
-    - name: Step 2.9 - Clean price column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_price import clean_price_data
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/census_region_added.csv')
-        df, summary = clean_price_data(df, 'price')
-        print_summary(summary)
-        df.to_csv('data/price_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.10 - Clean fuel column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_fuel import convert_fuel_to_gas
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/price_cleaned.csv')
-        df, summary = convert_fuel_to_gas(df)
-        print_summary(summary)
-        df.to_csv('data/fuel_cleaned.csv', index=False)
-        "
-    
-    - name: Step 2.11 - Clean odometer column
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_odometer import process_odometer_column
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/fuel_cleaned.csv')
-        df, summary = process_odometer_column(df, 'odometer')
-        print_summary(summary)
-        df.to_csv('data/stage2_complete.csv', index=False)
-        "
-    
-    - name: Upload cleaned data
-      id: upload-cleaned
-      uses: actions/upload-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/stage2_complete.csv
-        retention-days: 1
+# name: Data Cleaning Pipeline
 
-  # Stage 3: Validation (Parallel Jobs)
-  validate-census-region:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate census region
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_census_region import validate_regions
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_regions(df)
-        print_summary(summary)
-        print('✅ Census region validation passed!')
-        "
+# on:
+#   push:
+#     branches: [ main, develop ]
+#   pull_request:
+#     branches: [ main ]
+#   workflow_dispatch:
+#     inputs:
+#       data_path:
+#         description: 'Path to input CSV file'
+#         required: false
+#         default: 'data/vehicles.csv'
 
-  validate-year:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate year
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_year import validate_years
-        from utility.print_summary import print_summary
-        
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_years(df, year_column='year', min_year=1990)
-        print_summary(summary)
-        print('✅ Year validation passed!')
-        "
+# env:
+#   PYTHON_VERSION: '3.12'
+#   DATA_PATH: ${{ github.event.inputs.data_path || 'data/vehicles.csv' }}
 
-  validate-transmission:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate transmission
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_transmission import validate_transmission_values
-        from utility.print_summary import print_summary
+# jobs:
+#   # Stage 1: Standardizing
+#   standardizing:
+#     runs-on: ubuntu-latest
+#     outputs:
+#       standardized-data: ${{ steps.upload-standardized.outputs.artifact-id }}
+    
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+    
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+    
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy tqdm
+#         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    
+#     - name: Step 1.1 - Extract and standardize car data
+#       run: |
+#         python -c "
+#         import sys, os
+#         sys.path.append('.')
+#         import pandas as pd
+#         from DataCleaning.data_model import process_car_dataset
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_transmission_values(df)
-        print_summary(summary)
-        print('✅ Transmission validation passed!')
-        "
-
-  validate-fuel:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate fuel
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_fuel import validate_fuel_values
-        from utility.print_summary import print_summary
+#         print('Loading data...')
+#         df = pd.read_csv('${{ env.DATA_PATH }}')
+#         print(f'Original data shape: {df.shape}')
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_fuel_values(df)
-        print_summary(summary)
-        print('✅ Fuel validation passed!')
-        "
-
-  validate-title-status:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate title status
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_title_status import validate_title_status_values
-        from utility.print_summary import print_summary
+#         print('Starting standardization...')
+#         df_standardized, summary = process_car_dataset(df)
+#         print_summary(summary)
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_title_status_values(df)
-        print_summary(summary)
-        print('✅ Title status validation passed!')
-        "
-
-  validate-type:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate type
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_type import validate_type_values
-        from utility.print_summary import print_summary
+#         print('Saving standardized data...')
+#         df_standardized.to_csv('data/standardized_data.csv', index=False)
+#         print('Standardization completed!')
+#         "
+    
+#     - name: Step 1.2 - Drop unnecessary columns
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_cleaning import drop_unnecessary_columns
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_type_values(df, standardize_case=True)
-        print_summary(summary)
-        print('✅ Type validation passed!')
-        "
-
-  validate-manufacturer:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate manufacturer
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_manufacturers import validate_manufacturers
-        from utility.print_summary import print_summary
+#         df = pd.read_csv('data/standardized_data.csv')
+#         df, summary = drop_unnecessary_columns(df)
+#         print_summary(summary)
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_manufacturers(df)
-        print_summary(summary)
-        print('✅ Manufacturer validation passed!')
-        "
-
-  validate-paint-color:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate paint color
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_paint_color import validate_paint_color
-        from utility.print_summary import print_summary
+#         df.to_csv('data/columns_dropped.csv', index=False)
+#         "
+    
+#     - name: Step 1.3 - Drop rows with few missing values
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_cleaning import drop_rows_with_few_missing_values
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_paint_color(df)
-        print_summary(summary)
-        print('✅ Paint color validation passed!')
-        "
-
-  validate-state:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate state
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_state import validate_state
-        from utility.print_summary import print_summary
+#         df = pd.read_csv('data/columns_dropped.csv')
+#         df, summary = drop_rows_with_few_missing_values(df)
+#         print_summary(summary)
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_state(df)
-        print_summary(summary)
-        print('✅ State validation passed!')
-        "
+#         df.to_csv('data/stage1_complete.csv', index=False)
+#         "
+    
+#     - name: Upload standardized data
+#       id: upload-standardized
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: standardized-data
+#         path: data/stage1_complete.csv
+#         retention-days: 1
 
-  validate-model:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate model
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_model import validate_model_frequency
-        from utility.print_summary import print_summary
+#   # Stage 2: Cleaning and Filling Null Values
+#   cleaning-and-filling:
+#     runs-on: ubuntu-latest
+#     needs: standardizing
+#     outputs:
+#       cleaned-data: ${{ steps.upload-cleaned.outputs.artifact-id }}
+    
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+    
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+    
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy tqdm
+#         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    
+#     - name: Download standardized data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: standardized-data
+#         path: data/
+    
+#     - name: Step 2.1 - Fill title_status missing values
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_title_status import fill_missing_values
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_model_frequency(df, min_count=10)
-        print_summary(summary)
-        print('✅ Model validation passed!')
-        "
-
-  validate-drive:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate drive
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_drive import validate_drive_values
-        from utility.print_summary import print_summary
+#         df = pd.read_csv('data/stage1_complete.csv')
+#         df, summary = fill_missing_values(df)
+#         print_summary(summary)
+#         df.to_csv('data/title_status_filled.csv', index=False)
+#         "
+    
+#     - name: Step 2.2 - Fill transmission missing values
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_transmission import fill_missing_values_transmission, convert_transmission_to_automatic
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_drive_values(df)
-        print_summary(summary)
-        print('✅ Drive validation passed!')
-        "
-
-  validate-odometer:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate odometer
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_odometer import validate_odometer
-        from utility.print_summary import print_summary
+#         df = pd.read_csv('data/title_status_filled.csv')
+#         df, summary = fill_missing_values_transmission(df)
+#         print_summary(summary)
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_odometer(df, min_miles=0, max_miles=500000)
-        print_summary(summary)
-        print('✅ Odometer validation passed!')
-        "
-
-  validate-coordinates:
-    runs-on: ubuntu-latest
-    needs: cleaning-and-filling
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy
-    - name: Download cleaned data
-      uses: actions/download-artifact@v4
-      with:
-        name: cleaned-data
-        path: data/
-    - name: Validate coordinates
-      run: |
-        python -c "
-        import pandas as pd
-        from DataCleaning.data_lat_long import validate_usa_coordinates
-        from utility.print_summary import print_summary
+#         df, summary = convert_transmission_to_automatic(df)
+#         print_summary(summary)
+#         df.to_csv('data/transmission_filled.csv', index=False)
+#         "
+    
+#     - name: Step 2.3 - Clean drive column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_drive import clean_drive_column, fill_missing_drive_from_reference, impute_drive_from_type
+#         from utility.print_summary import print_summary
         
-        df = pd.read_csv('data/stage2_complete.csv')
-        df, summary = validate_usa_coordinates(df)
-        print_summary(summary)
-        print('✅ Coordinates validation passed!')
-        "
+#         df = pd.read_csv('data/transmission_filled.csv')
+        
+#         # Clean drive column
+#         df, summary = clean_drive_column(df, 'drive')
+#         print_summary(summary)
+        
+#         # Fill from reference
+#         df, summary = fill_missing_drive_from_reference(df, reference_file='data/models_with_drive.csv')
+#         print_summary(summary)
+        
+#         # Impute from type
+#         df, summary = impute_drive_from_type(df)
+#         print_summary(summary)
+        
+#         df.to_csv('data/drive_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.4 - Clean model column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_model import remove_numerical_models, clean_models_with_list_optimized, filter_by_value_counts
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/drive_cleaned.csv')
+        
+#         # Remove numerical models
+#         df, summary = remove_numerical_models(df)
+#         print_summary(summary)
+        
+#         # Clean models with list
+#         df, summary = clean_models_with_list_optimized(df)
+#         print_summary(summary)
+        
+#         # Filter by value counts
+#         df = filter_by_value_counts(df, 'model', min_count=10)
+        
+#         df.to_csv('data/model_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.5 - Clean type column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_type import drop_na_drive_type, replace_values, fill_type_from_model, drop_na_type
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/model_cleaned.csv')
+        
+#         # Drop rows with both drive and type missing
+#         df, summary = drop_na_drive_type(df)
+#         print_summary(summary)
+        
+#         # Standardize type values
+#         df, summary = replace_values(df, 'type', {'mini van': 'minivan', 'mini-van': 'minivan'})
+#         print_summary(summary)
+        
+#         # Fill type from model
+#         df, summary = fill_type_from_model(df)
+#         print_summary(summary)
+        
+#         # Drop remaining nulls
+#         df, summary = drop_na_type(df)
+#         print_summary(summary)
+        
+#         df.to_csv('data/type_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.6 - Clean manufacturer column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_manufacturers import standardize_manufacturer
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/type_cleaned.csv')
+#         df, summary = standardize_manufacturer(df)
+#         print_summary(summary)
+#         df.to_csv('data/manufacturer_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.7 - Clean paint color column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_paint_color import fill_paint_color_nulls
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/manufacturer_cleaned.csv')
+#         df, summary = fill_paint_color_nulls(df)
+#         print_summary(summary)
+#         df.to_csv('data/paint_color_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.8 - Add census region
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_census_region import add_census_divisions_abbrev
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/paint_color_cleaned.csv')
+#         df, summary = add_census_divisions_abbrev(df)
+#         print_summary(summary)
+#         df.to_csv('data/census_region_added.csv', index=False)
+#         "
+    
+#     - name: Step 2.9 - Clean price column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_price import clean_price_data
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/census_region_added.csv')
+#         df, summary = clean_price_data(df, 'price')
+#         print_summary(summary)
+#         df.to_csv('data/price_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.10 - Clean fuel column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_fuel import convert_fuel_to_gas
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/price_cleaned.csv')
+#         df, summary = convert_fuel_to_gas(df)
+#         print_summary(summary)
+#         df.to_csv('data/fuel_cleaned.csv', index=False)
+#         "
+    
+#     - name: Step 2.11 - Clean odometer column
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_odometer import process_odometer_column
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/fuel_cleaned.csv')
+#         df, summary = process_odometer_column(df, 'odometer')
+#         print_summary(summary)
+#         df.to_csv('data/stage2_complete.csv', index=False)
+#         "
+    
+#     - name: Upload cleaned data
+#       id: upload-cleaned
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/stage2_complete.csv
+#         retention-days: 1
 
-  # Final job to collect all validation results
-  finalize-pipeline:
-    runs-on: ubuntu-latest
-    needs: [
-      validate-census-region, validate-year, validate-transmission, validate-fuel,
-      validate-title-status, validate-type, validate-manufacturer, validate-paint-color,
-      validate-state, validate-model, validate-drive, validate-odometer, validate-coordinates
-    ]
-    steps:
-    - name: Pipeline completed successfully
-      run: |
-        echo "🎉 Data cleaning pipeline completed successfully!"
-        echo "✅ All validation steps passed"
-        echo "📊 Data is ready for analysis" 
+#   # Stage 3: Validation (Parallel Jobs)
+#   validate-census-region:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate census region
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_census_region import validate_regions
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_regions(df)
+#         print_summary(summary)
+#         print('✅ Census region validation passed!')
+#         "
+
+#   validate-year:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate year
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_year import validate_years
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_years(df, year_column='year', min_year=1990)
+#         print_summary(summary)
+#         print('✅ Year validation passed!')
+#         "
+
+#   validate-transmission:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate transmission
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_transmission import validate_transmission_values
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_transmission_values(df)
+#         print_summary(summary)
+#         print('✅ Transmission validation passed!')
+#         "
+
+#   validate-fuel:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate fuel
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_fuel import validate_fuel_values
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_fuel_values(df)
+#         print_summary(summary)
+#         print('✅ Fuel validation passed!')
+#         "
+
+#   validate-title-status:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate title status
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_title_status import validate_title_status_values
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_title_status_values(df)
+#         print_summary(summary)
+#         print('✅ Title status validation passed!')
+#         "
+
+#   validate-type:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate type
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_type import validate_type_values
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_type_values(df, standardize_case=True)
+#         print_summary(summary)
+#         print('✅ Type validation passed!')
+#         "
+
+#   validate-manufacturer:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate manufacturer
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_manufacturers import validate_manufacturers
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_manufacturers(df)
+#         print_summary(summary)
+#         print('✅ Manufacturer validation passed!')
+#         "
+
+#   validate-paint-color:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate paint color
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_paint_color import validate_paint_color
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_paint_color(df)
+#         print_summary(summary)
+#         print('✅ Paint color validation passed!')
+#         "
+
+#   validate-state:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate state
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_state import validate_state
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_state(df)
+#         print_summary(summary)
+#         print('✅ State validation passed!')
+#         "
+
+#   validate-model:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate model
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_model import validate_model_frequency
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_model_frequency(df, min_count=10)
+#         print_summary(summary)
+#         print('✅ Model validation passed!')
+#         "
+
+#   validate-drive:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate drive
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_drive import validate_drive_values
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_drive_values(df)
+#         print_summary(summary)
+#         print('✅ Drive validation passed!')
+#         "
+
+#   validate-odometer:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate odometer
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_odometer import validate_odometer
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_odometer(df, min_miles=0, max_miles=500000)
+#         print_summary(summary)
+#         print('✅ Odometer validation passed!')
+#         "
+
+#   validate-coordinates:
+#     runs-on: ubuntu-latest
+#     needs: cleaning-and-filling
+#     steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: ${{ env.PYTHON_VERSION }}
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install pandas numpy
+#     - name: Download cleaned data
+#       uses: actions/download-artifact@v4
+#       with:
+#         name: cleaned-data
+#         path: data/
+#     - name: Validate coordinates
+#       run: |
+#         python -c "
+#         import pandas as pd
+#         from DataCleaning.data_lat_long import validate_usa_coordinates
+#         from utility.print_summary import print_summary
+        
+#         df = pd.read_csv('data/stage2_complete.csv')
+#         df, summary = validate_usa_coordinates(df)
+#         print_summary(summary)
+#         print('✅ Coordinates validation passed!')
+#         "
+
+#   # Final job to collect all validation results
+#   finalize-pipeline:
+#     runs-on: ubuntu-latest
+#     needs: [
+#       validate-census-region, validate-year, validate-transmission, validate-fuel,
+#       validate-title-status, validate-type, validate-manufacturer, validate-paint-color,
+#       validate-state, validate-model, validate-drive, validate-odometer, validate-coordinates
+#     ]
+#     steps:
+#     - name: Pipeline completed successfully
+#       run: |
+#         echo "🎉 Data cleaning pipeline completed successfully!"
+#         echo "✅ All validation steps passed"
+#         echo "📊 Data is ready for analysis" 
