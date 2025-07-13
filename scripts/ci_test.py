@@ -76,7 +76,7 @@ def test_basic_operations(gcs, bucket_name):
         if df_read is None or len(df_read) == 0:
             raise Exception("CSV read failed")
         
-        logger.info(f"✅ CSV operations successful! Read {len(df_read)} rows")
+        logger.info(f"✓ CSV operations successful! Read {len(df_read)} rows")
         
         # Test Parquet operations
         parquet_path = csv_path.replace('.csv', '.parquet')
@@ -91,16 +91,16 @@ def test_basic_operations(gcs, bucket_name):
         if df_parquet is None or len(df_parquet) == 0:
             raise Exception("Parquet read failed")
         
-        logger.info(f"✅ Parquet operations successful! Read {len(df_parquet)} rows")
+        logger.info(f"✓ Parquet operations successful! Read {len(df_parquet)} rows")
         
         # Test file listing
         files = gcs.list_data_files(bucket_name, prefix="ci_tests/")
-        logger.info(f"✅ Found {len(files['csv']) + len(files['parquet'])} test files")
+        logger.info(f"✓ Found {len(files['csv']) + len(files['parquet'])} test files")
         
         # Clean up test files
         gcs.delete_file(bucket_name, csv_path)
         gcs.delete_file(bucket_name, parquet_path)
-        logger.info("✅ Cleanup completed")
+        logger.info("✓ Cleanup completed")
         
         return True
         
@@ -122,7 +122,7 @@ def test_file_info_operations(gcs, bucket_name):
         # Test file info
         file_info = gcs.get_file_info(bucket_name, info_test_path)
         if file_info:
-            logger.info(f"✅ File info retrieved: {file_info['size_mb']} MB")
+            logger.info(f"✓ File info retrieved: {file_info['size_mb']} MB")
         else:
             raise Exception("Could not retrieve file info")
         
@@ -131,7 +131,7 @@ def test_file_info_operations(gcs, bucket_name):
         if not exists:
             raise Exception("File existence check failed")
         
-        logger.info("✅ File existence check passed")
+        logger.info("✓ File existence check passed")
         
         # Cleanup
         gcs.delete_file(bucket_name, info_test_path)
@@ -151,21 +151,21 @@ def main():
     # Test 1: Authentication
     gcs, project_id, bucket_name = test_authentication()
     if not gcs:
-        logger.error("❌ Authentication test failed - stopping tests")
+        logger.error("✗ Authentication test failed - stopping tests")
         sys.exit(1)
     
     # Test 2: Basic operations
     if not test_basic_operations(gcs, bucket_name):
-        logger.error("❌ Basic operations test failed")
+        logger.error("✗ Basic operations test failed")
         sys.exit(1)
     
     # Test 3: File info operations
     if not test_file_info_operations(gcs, bucket_name):
-        logger.error("❌ File info operations test failed")
+        logger.error("✗ File info operations test failed")
         sys.exit(1)
     
     logger.info("=" * 50)
-    logger.info("🎉 All tests passed successfully!")
+    logger.info("All tests passed successfully!")
     logger.info("CI/CD pipeline is working correctly with GCS")
     logger.info("=" * 50)
 
