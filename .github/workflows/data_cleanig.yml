@@ -163,6 +163,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [setup, google-auth]
     
+    outputs:
+      cleaning-status: ${{ steps.run-cleaning.outputs.status }}
+      dataset-shape: ${{ steps.run-cleaning.outputs.dataset-shape }}
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -198,23 +202,149 @@ jobs:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
         project_id: ${{ secrets.GCP_PROJECT_ID }}
     
-    - name: Set environment variables
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+    
+    - name: Set environment variables for data cleaning
       run: |
+        echo "Setting up environment variables for data cleaning..."
+        echo "PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" >> $GITHUB_ENV
         echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
         echo "GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" >> $GITHUB_ENV
+        echo "✓ Environment variables configured"
     
-    - name: Data Cleaning Stage
+    - name: Verify data cleaning dependencies
       run: |
-        echo "Starting Data Cleaning Stage..."
-        echo "Waiting for data cleaning code to be provided..."
-        echo "This stage will be implemented next"
+        echo "Verifying data cleaning module dependencies..."
+        poetry run python -c "
+        try:
+            import sys
+            import os
+            sys.path.append(os.getcwd())
+            from DataCleaning.data_cleaning_main import main_data_cleaning_pipeline
+            print('✓ Data cleaning module imported successfully')
+        except ImportError as e:
+            print(f'❌ Import error: {e}')
+            sys.exit(1)
+        except Exception as e:
+            print(f'❌ Error: {e}')
+            sys.exit(1)
+        "
+    
+    - name: Run data cleaning pipeline
+      id: run-cleaning
+      run: |
+        echo "==================== STARTING DATA CLEANING PIPELINE ===================="
+        echo "Project ID: $PROJECT_ID"
+        echo "Bucket Name: $BUCKET_NAME"
+        echo ""
         
-        # TODO: Add data cleaning operations here
-        # This is where the data cleaning code will go
+        # Create a wrapper script to handle the data cleaning and capture outputs
+        cat > run_cleaning.py << 'EOF'
+        import sys
+        import os
+        import traceback
         
-        echo "✓ Stage 3 (Data Cleaning) placeholder completed"
+        try:
+            # Add current directory to Python path
+            sys.path.append(os.getcwd())
+            
+            # Import and run the data cleaning pipeline
+            from DataCleaning.data_cleaning_main import main_data_cleaning_pipeline
+            
+            print("🚀 Starting data cleaning pipeline...")
+            print("-" * 60)
+            
+            # Run the main data cleaning pipeline
+            cleaned_df = main_data_cleaning_pipeline()
+            
+            print("-" * 60)
+            print(f"✅ Data cleaning completed successfully!")
+            print(f"📊 Final dataset shape: {cleaned_df.shape}")
+            print(f"📈 Rows: {cleaned_df.shape[0]:,}")
+            print(f"📋 Columns: {cleaned_df.shape[1]}")
+            
+            # Print final column info
+            print("\n📋 Final columns:")
+            for i, col in enumerate(cleaned_df.columns, 1):
+                print(f"  {i:2d}. {col}")
+            
+            # Print data quality summary
+            print(f"\n📊 Data Quality Summary:")
+            total_cells = cleaned_df.shape[0] * cleaned_df.shape[1]
+            null_cells = cleaned_df.isnull().sum().sum()
+            completeness = ((total_cells - null_cells) / total_cells) * 100
+            print(f"  • Total cells: {total_cells:,}")
+            print(f"  • Null cells: {null_cells:,}")
+            print(f"  • Data completeness: {completeness:.2f}%")
+            
+            # Save outputs for GitHub Actions
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"status=success\n")
+                f.write(f"dataset-shape={cleaned_df.shape[0]}x{cleaned_df.shape[1]}\n")
+            
+            print("\n🎉 DATA CLEANING PIPELINE COMPLETED SUCCESSFULLY! 🎉")
+            
+        except Exception as e:
+            print(f"\n❌ ERROR in data cleaning pipeline:")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            print(f"\nFull traceback:")
+            traceback.print_exc()
+            
+            # Save error status for GitHub Actions
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"status=failed\n")
+                f.write(f"dataset-shape=error\n")
+            
+            sys.exit(1)
+        EOF
+        
+        # Run the data cleaning pipeline
+        poetry run python run_cleaning.py
       env:
+        PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
         GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
+    
+    - name: Data cleaning stage summary
+      run: |
+        echo "==================== DATA CLEANING STAGE SUMMARY ===================="
+        echo "Status: ${{ steps.run-cleaning.outputs.status }}"
+        echo "Dataset Shape: ${{ steps.run-cleaning.outputs.dataset-shape }}"
+        echo ""
+        if [ "${{ steps.run-cleaning.outputs.status }}" = "success" ]; then
+          echo "✅ Stage 3 (Data Cleaning) completed successfully!"
+          echo "🎯 Ready for next pipeline stage"
+        else
+          echo "❌ Stage 3 (Data Cleaning) failed!"
+          echo "🔍 Check the logs above for error details"
+          exit 1
+        fi
+        echo "====================================================================="
 
-  
+  # ==================== STAGE 4: MODEL TRAINING (PLACEHOLDER) ====================
+  model-training:
+    name: "Stage 4: Model Training"
+    runs-on: ubuntu-latest
+    needs: [setup, google-auth, data-cleaning]
+    if: needs.data-cleaning.outputs.cleaning-status == 'success'
+    
+    steps:
+    - name: Model training placeholder
+      run: |
+        echo "==================== MODEL TRAINING STAGE ===================="
+        echo "✅ Data cleaning completed successfully"
+        echo "📊 Dataset shape: ${{ needs.data-cleaning.outputs.dataset-shape }}"
+        echo ""
+        echo "🚧 Model training stage - Coming next..."
+        echo "This stage will include:"
+        echo "  • Feature engineering"
+        echo "  • Model training"
+        echo "  • Model validation"
+        echo "  • Model deployment"
+        echo "=============================================================="
