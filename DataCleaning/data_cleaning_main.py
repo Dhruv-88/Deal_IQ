@@ -23,8 +23,8 @@ def main_data_cleaning_pipeline():
     df = gcs.read_parquet(GCS_BUCKET_NAME, "raw_data.parquet")
     
     # Step 3: Standardization and extracting info from model and description
-    from DataCleaning.data_model import process_car_dataset
-    df = process_car_dataset(df)
+    from DataCleaning.data_model import extract_car_data
+    df = extract_car_data(df)
     
     # Step 4: Drop unnecessary columns
     from DataCleaning.data_cleaning import drop_unnecessary_columns, drop_rows_with_few_missing_values

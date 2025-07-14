@@ -1,5 +1,6 @@
 import pandas as pd 
 import numpy as np
+import os
 from typing import Dict
 
 
@@ -197,15 +198,15 @@ def validate_drive_values(df: pd.DataFrame, drive_column: str = 'drive'):
 
 
 def fill_missing_drive_from_reference(df: pd.DataFrame, 
-                                    reference_file: str = 'data/models_with_drive.csv',
+                                    reference_file: str = 'models_with_drive.csv',
                                     model_column: str = 'model',
                                     drive_column: str = 'drive'):
     """
-    Fill missing drive values by matching model names with a reference CSV file
+    Fill missing drive values by matching model names with a reference CSV file from Google Cloud Storage
     
     Parameters:
     df (pd.DataFrame): DataFrame containing model and drive columns
-    reference_file (str): Path to the reference CSV file with model-drive mappings
+    reference_file (str): Name of the reference CSV file in GCS bucket (default: 'models_with_drive.csv')
     model_column (str): Name of the model column (default: 'model')
     drive_column (str): Name of the drive column (default: 'drive')
     
@@ -219,8 +220,31 @@ def fill_missing_drive_from_reference(df: pd.DataFrame,
     missing_before = df_clean[drive_column].isna().sum()
     
     try:
-        # Load the reference data
-        reference_df = pd.read_csv(reference_file)
+        # Load the reference data from Google Cloud Storage
+        from cloud.gcs_storage_operations import GCSDataOperations
+        
+        # Get environment variables for GCS operations
+        gcp_project_id = os.getenv('PROJECT_ID') or os.getenv('GCP_PROJECT_ID')
+        gcs_bucket_name = os.getenv('BUCKET_NAME') or os.getenv('GCS_BUCKET_NAME')
+        
+        if not gcp_project_id or not gcs_bucket_name:
+            summary = {
+                'total_rows': len(df_clean),
+                'missing_before': missing_before,
+                'missing_after': missing_before,
+                'values_filled': 0,
+                'error': "GCP_PROJECT_ID and GCS_BUCKET_NAME environment variables must be set"
+            }
+            return df_clean, summary
+        
+        # Initialize GCS operations
+        gcs = GCSDataOperations(gcp_project_id)
+        
+        # Read reference data from GCS
+        reference_df = gcs.read_csv(gcs_bucket_name, reference_file)
+        
+        print(f"✓ Successfully loaded reference data from GCS: {reference_file}")
+        print(f"  Reference data shape: {reference_df.shape}")
         
         # Check if required columns exist in reference file
         if 'model' not in reference_df.columns or 'drive' not in reference_df.columns:
@@ -242,6 +266,8 @@ def fill_missing_drive_from_reference(df: pd.DataFrame,
         
         # Create a mapping dictionary for faster lookup
         model_drive_mapping = dict(zip(reference_df['model'], reference_df['drive']))
+        
+        print(f"  Created model-drive mapping with {len(model_drive_mapping)} entries")
         
         # Find rows with missing drive values
         missing_drive_mask = df_clean[drive_column].isna()
@@ -277,6 +303,9 @@ def fill_missing_drive_from_reference(df: pd.DataFrame,
         # Count missing values after filling
         missing_after = df_clean[drive_column].isna().sum()
         
+        print(f"  Drive values filled: {filled_count}")
+        print(f"  Models not found in reference: {not_found_count}")
+        
         # Create summary
         summary = {
             'total_rows': len(df_clean),
@@ -287,20 +316,51 @@ def fill_missing_drive_from_reference(df: pd.DataFrame,
             'mappings_loaded': len(model_drive_mapping)
         }
         
-    except FileNotFoundError:
-        summary = {
-            'total_rows': len(df_clean),
-            'missing_before': missing_before,
-            'missing_after': missing_before,
-            'values_filled': 0,
-            'error': f"Reference file '{reference_file}' not found"
-        }
     except Exception as e:
+        print(f"Warning: Could not load reference data from GCS: {e}")
+        
+        # If GCS fails, try to provide some basic model-drive mappings as fallback
+        print("Using fallback model-drive mappings...")
+        
+        # Basic fallback mappings for common models
+        fallback_mappings = {
+            # Common FWD models
+            'civic': 'fwd', 'accord': 'fwd', 'camry': 'fwd', 'corolla': 'fwd',
+            'altima': 'fwd', 'sentra': 'fwd', 'focus': 'fwd', 'fusion': 'fwd',
+            'malibu': 'fwd', 'impala': 'fwd', 'sonata': 'fwd', 'elantra': 'fwd',
+            
+            # Common RWD models
+            'mustang': 'rwd', 'camaro': 'rwd', 'challenger': 'rwd', 'charger': 'rwd',
+            'corvette': 'rwd', '3 series': 'rwd', '5 series': 'rwd', 'c-class': 'rwd',
+            
+            # Common 4WD models
+            'f-150': '4wd', 'silverado': '4wd', 'sierra': '4wd', 'ram 1500': '4wd',
+            'wrangler': '4wd', 'cherokee': '4wd', 'grand cherokee': '4wd',
+            'tahoe': '4wd', 'suburban': '4wd', 'explorer': '4wd'
+        }
+        
+        # Apply fallback mappings
+        filled_count = 0
+        missing_drive_mask = df_clean[drive_column].isna()
+        
+        for idx in df_clean[missing_drive_mask].index:
+            model_value = df_clean.at[idx, model_column]
+            
+            if pd.notna(model_value):
+                model_clean = str(model_value).lower().strip()
+                
+                if model_clean in fallback_mappings:
+                    df_clean.at[idx, drive_column] = fallback_mappings[model_clean]
+                    filled_count += 1
+        
+        missing_after = df_clean[drive_column].isna().sum()
+        
         summary = {
             'total_rows': len(df_clean),
             'missing_before': missing_before,
-            'missing_after': missing_before,
-            'values_filled': 0,
+            'missing_after': missing_after,
+            'values_filled': filled_count,
+            'fallback_used': True,
             'error': str(e)
         }
     
