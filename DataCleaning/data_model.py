@@ -8,6 +8,8 @@ from typing import Dict, Optional, Union
 
 
 
+
+
 def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Extract and organize car data from the 'model' and 'description' columns
@@ -38,7 +40,7 @@ def extract_car_data(df: pd.DataFrame) -> pd.DataFrame:
     }
     
     # Common car manufacturers for identification
-    manufacturers = pd.read_csv('../data/manufacturers_list.csv')['manufacturer'].tolist()
+    manufacturers = gcs.read_csv('')
     
     def parse_string(text_to_parse: str) -> Dict[str, Optional[Union[str, int]]]:
         """Parse individual string and extract components"""

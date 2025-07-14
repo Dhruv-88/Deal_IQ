@@ -194,7 +194,6 @@ data/temp/*
 data/tmp/*
 
 # Large datasets
-*.csv
 *.tsv
 *.parquet
 *.feather
