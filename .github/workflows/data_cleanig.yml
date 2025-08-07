@@ -1,12 +1,8 @@
 name: Deal Prediction Pipeline
 
-# Trigger the workflow
+# Trigger the workflow - MODIFIED for manual triggers only
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual trigger only
 
 # Set global environment variables
 env:
@@ -327,24 +323,3 @@ jobs:
         fi
         echo "====================================================================="
 
-  # ==================== STAGE 4: MODEL TRAINING (PLACEHOLDER) ====================
-  model-training:
-    name: "Stage 4: Model Training"
-    runs-on: ubuntu-latest
-    needs: [setup, google-auth, data-cleaning]
-    if: needs.data-cleaning.outputs.cleaning-status == 'success'
-    
-    steps:
-    - name: Model training placeholder
-      run: |
-        echo "==================== MODEL TRAINING STAGE ===================="
-        echo "✅ Data cleaning completed successfully"
-        echo "📊 Dataset shape: ${{ needs.data-cleaning.outputs.dataset-shape }}"
-        echo ""
-        echo "🚧 Model training stage - Coming next..."
-        echo "This stage will include:"
-        echo "  • Feature engineering"
-        echo "  • Model training"
-        echo "  • Model validation"
-        echo "  • Model deployment"
-        echo "=============================================================="
