@@ -36,7 +36,7 @@ class GCSDataOperations:
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
         
         self.client = storage.Client(project=project_id)
-        logger.info(f"GCS Data client initialized for project: {project_id}")
+        logger.info("GCS Data client initialized successfully")
     
     # ==================== CSV OPERATIONS ====================
     
@@ -67,7 +67,7 @@ class GCSDataOperations:
             csv_string = df.to_csv(**csv_params)
             blob.upload_from_string(csv_string, content_type='text/csv')
             
-            logger.info(f"CSV uploaded: {bucket_name}/{blob_name} ({len(df)} rows)")
+            logger.info(f"CSV uploaded successfully ({len(df)} rows)")
             return True
         except Exception as e:
             logger.error(f"Error uploading CSV: {str(e)}")
@@ -92,7 +92,7 @@ class GCSDataOperations:
             csv_string = blob.download_as_text()
             df = pd.read_csv(StringIO(csv_string), **kwargs)
             
-            logger.info(f"CSV read: {bucket_name}/{blob_name} ({len(df)} rows, {len(df.columns)} columns)")
+            logger.info(f"CSV read successfully ({len(df)} rows, {len(df.columns)} columns)")
             return df
         except Exception as e:
             logger.error(f"Error reading CSV: {str(e)}")
@@ -159,7 +159,7 @@ class GCSDataOperations:
             
             blob.upload_from_string(buffer.getvalue(), content_type='application/octet-stream')
             
-            logger.info(f"Parquet uploaded: {bucket_name}/{blob_name} ({len(df)} rows)")
+            logger.info(f"Parquet uploaded successfully ({len(df)} rows)")
             return True
         except Exception as e:
             logger.error(f"Error uploading Parquet: {str(e)}")
@@ -184,7 +184,7 @@ class GCSDataOperations:
             parquet_bytes = blob.download_as_bytes()
             df = pd.read_parquet(BytesIO(parquet_bytes), **kwargs)
             
-            logger.info(f"Parquet read: {bucket_name}/{blob_name} ({len(df)} rows, {len(df.columns)} columns)")
+            logger.info(f"Parquet read successfully ({len(df)} rows, {len(df.columns)} columns)")
             return df
         except Exception as e:
             logger.error(f"Error reading Parquet: {str(e)}")
@@ -246,9 +246,9 @@ class GCSDataOperations:
             
             if success and delete_csv:
                 self.delete_file(bucket_name, csv_blob)
-                logger.info(f"Original CSV file deleted: {csv_blob}")
+                logger.info("Original CSV file deleted successfully")
             
-            logger.info(f"Converted {csv_blob} to {parquet_blob}")
+            logger.info("CSV to Parquet conversion completed successfully")
             return success
             
         except Exception as e:
@@ -280,9 +280,9 @@ class GCSDataOperations:
             
             if success and delete_parquet:
                 self.delete_file(bucket_name, parquet_blob)
-                logger.info(f"Original Parquet file deleted: {parquet_blob}")
+                logger.info("Original Parquet file deleted successfully")
             
-            logger.info(f"Converted {parquet_blob} to {csv_blob}")
+            logger.info("Parquet to CSV conversion completed successfully")
             return success
             
         except Exception as e:
@@ -351,7 +351,7 @@ class GCSDataOperations:
                         files_by_type[file_type].append(blob.name)
             
             total_files = sum(len(files) for files in files_by_type.values())
-            logger.info(f"Found {total_files} data files in {bucket_name}")
+            logger.info(f"Found {total_files} data files successfully")
             
             return files_by_type
         except Exception as e:
@@ -374,7 +374,7 @@ class GCSDataOperations:
             blob = bucket.blob(blob_name)
             blob.delete()
             
-            logger.info(f"File deleted: {bucket_name}/{blob_name}")
+            logger.info("File deleted successfully")
             return True
         except Exception as e:
             logger.error(f"Error deleting file: {str(e)}")
