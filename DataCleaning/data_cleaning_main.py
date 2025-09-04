@@ -200,6 +200,7 @@ def main_data_cleaning_pipeline():
     print("\nFinal null values summary:")
     print(df.isna().sum()) 
     
+    df.drop(columns=['description','id'], inplace=True)
 
     # writing clean file to the cloud storage
     gcs.upload_parquet(bucket_name=GCS_BUCKET_NAME,blob_name='clean_data.parquet',df=df)

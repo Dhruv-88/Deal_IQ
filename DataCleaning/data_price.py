@@ -23,7 +23,7 @@ def clean_price_data(df, price_col='price'):
    
    # Set reasonable price limits for used cars
    min_price = 500      # Minimum reasonable car price
-   max_price = 300000   # Maximum reasonable used car price
+   max_price = 100000   # Maximum reasonable used car price
    
    # Apply price range filtering
    df_clean = df_clean[(df_clean[price_col] >= min_price) & 
