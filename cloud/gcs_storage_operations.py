@@ -12,10 +12,29 @@ from google.cloud.exceptions import NotFound
 from typing import Optional, List, Dict, Any
 import logging
 from io import BytesIO, StringIO
+import json
+import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle NumPy and Pandas data types"""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, pd.NaType):
+            return None
+        elif hasattr(obj, 'item'):  # Handle other numpy scalar types
+            return obj.item()
+        return super(NumpyEncoder, self).default(obj)
 
 class GCSDataOperations:
     """
@@ -219,6 +238,67 @@ class GCSDataOperations:
             logger.error(f"Error appending to Parquet: {str(e)}")
             return False
     
+    # ==================== JSON OPERATIONS ====================
+    
+    def upload_json(self, bucket_name: str, blob_name: str, data: Any, **kwargs) -> bool:
+        """
+        Upload data as JSON to GCS
+        
+        Args:
+            bucket_name: Name of the bucket
+            blob_name: Name of the JSON file in GCS (e.g., 'data/file.json')
+            data: Data to upload (dict, list, or any JSON-serializable object)
+            **kwargs: Additional parameters for json.dumps() (e.g., indent, ensure_ascii)
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            bucket = self.client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            
+            # Default JSON parameters
+            json_params = {
+                'indent': 2,
+                'ensure_ascii': False,
+                'cls': NumpyEncoder  # Use custom encoder for NumPy/Pandas types
+            }
+            json_params.update(kwargs)
+            
+            json_string = json.dumps(data, **json_params)
+            blob.upload_from_string(json_string, content_type='application/json')
+            
+            logger.info(f"JSON uploaded successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error uploading JSON: {str(e)}")
+            return False
+    
+    def read_json(self, bucket_name: str, blob_name: str, **kwargs) -> Optional[Any]:
+        """
+        Read JSON file from GCS
+        
+        Args:
+            bucket_name: Name of the bucket
+            blob_name: Name of the JSON file in GCS
+            **kwargs: Additional parameters for json.loads()
+        
+        Returns:
+            Any: Parsed JSON data, None if error
+        """
+        try:
+            bucket = self.client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            
+            json_string = blob.download_as_text()
+            data = json.loads(json_string, **kwargs)
+            
+            logger.info(f"JSON read successfully")
+            return data
+        except Exception as e:
+            logger.error(f"Error reading JSON: {str(e)}")
+            return None
+
     # ==================== CONVERSION OPERATIONS ====================
     
     def convert_csv_to_parquet(self, bucket_name: str, csv_blob: str, parquet_blob: str, 
